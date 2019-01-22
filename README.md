@@ -1,3 +1,7 @@
+[//]: # ( dpipes_version: 1.0.0 )
+
+---
+
 # About *dpipes*
 Distributed Pipes (or *dpipes*) is a framework for writing applications that
 communicate through something resembling a Unix pipe, but is actually a
@@ -38,7 +42,7 @@ self-contained.
 *dpipes* do not attempt to provide enterprise-grade features to distributed
 applications, such as traffic management, security policy enforcement, load
 balancing, rate limits, circuit breakers, and so on. Such features are
-admirable, but if you need all those features, go get yourself a real service
+admirable, but if you need all those features, you should get a real service
 mesh.
 
 ### - API Gateway
@@ -56,8 +60,32 @@ applications may want.
 ## Overview
 To create a *dpipe*, you should ideally have more than one node (though
 there's no reason you can't use just one node). Each node should have a
-*dpipesd* application installed. This will execute an application when it
-is connected to and a request to run an application is passed to it.
+**dpipesd** application installed. This process can be run as a daemon or as
+a foreground process. The process receives network connections and executes
+applications as requested, passing data into the program's *stdin* and receiving
+data from the program's *stdout*.
+
+Data is passed between applications on their respective nodes. The client does
+not receive anything but the output of the last application in the pipe.
+
+*dpipes* is mainly only useful for parallel processing of data. Take the following example:
+
+    $ dpipes 'cat /nfs/mydata/input.txt | sort | xargs ls -la'
+
+There is basically no benefit to running this command with *dpipes*. The output
+of each command is completed and then passed on to the next command on another
+node. Performing this command on a single node without *dpipes* would probably
+be much faster.
+
+Instead, let's try some simple parallelization of the same task:
+
+    $ for i in `seq 1 5` ; do dpipes "cat /nfs/mydata/input.$i.txt | sort | xargs ls -la" & ; done
+
+Here we background multiple *dpipes* applications that process multiple data
+files. Normally one could use a program like **dsh** to run commands in parallel
+across a range of hosts. But in this case, each individual step is run on
+a different node at the same time and processes data as it comes in.
+
 
 ## Configuration
 All configuration to *dpipesd* can be specified in the config files *.dpipesdrc*
@@ -140,23 +168,33 @@ Note: the prefix **__dp.** may change according to the **dpipesd** configuration
 
 ## Service Discovery
 By default, *dpipes* operates by connecting to a static list of hosts and ports.
-This can be quite limiting on most modern networks, so dpipes also supports
-service discovery agents.
+This can be quite limiting on most modern networks, so *dpipes* also supports
+service discovery.
 
-*dpipes* will use any service discovery agent that can be queried for a service
-called *dpipesd* and return a list of hosts and ports. dpipes will act as a 
-service that provides applications to route connections to.
+### Advertising *dpipesd*
+If **dpipesd** is configured with a service discovery agent, it will register
+itself when it starts as a service called "*dpipesd*". **dpipesd** will also
+query the service discovery agent or service registry for other nodes to connect
+to for running applications.
 
-However, an alternate model would include routing applications to specific
-services discovered with service discovery. The service names should include
-a *dp.* prefix, and anything following that prefix would be the application
-name. In this way, service discovery features to monitor service health and
-advertise particular applications can be used to further improve interaction
-between dpipes applications.
+### Advertising *dpipesd applications*
+In addition to advertising itself, **dpipesd** can advertise specific
+applications that it can run. In this way you can use the advanced features of
+a service discovery framework (such as healthchecks and alerts) to keep track
+of which nodes provide which applications.
+
+The application-specific service name will be the prefix "*dp.*" plus the
+application name, like "*dp.sort*".
+
+### Using discovered services
+If application-specific services are discovered, those services will be used
+to run particular applications. For example, if service discovery shows that
+there is a service called "*dp.sort*" running on 2 nodes, then every time
+**dpipesd** tries to run the application "*sort*", it will use the "*dp.sort*"
+service nodes.
 
 ## Access
-No access control is included by default.
-Due to the non-local nature of these pipes, network access to **dpipesd** should
+No access control is included by default. Network access to **dpipesd** should
 be restricted to trusted hosts only.
 
 Future releases of **dpipesd** will include authentication and authorization
@@ -166,7 +204,7 @@ will pass authentication on to a separate agent to validate a credential or
 request an authorization.
 
 ## Security
-By default, dpipes does not use a secured transport protocol. The transport
+By default, *dpipes* does not use a secured transport protocol. The transport
 protocol can be replaced with a secure one - however, metadata about the
 state of the connection will need to be passed along from the transport layer
 to the application.
